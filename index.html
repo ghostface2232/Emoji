@@ -44,6 +44,55 @@
         user-select: none;
       }
 
+      #scene-loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(8px) scale(0.985);
+        transition:
+          opacity 0.34s ease,
+          transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+        z-index: 90;
+      }
+
+      #scene-loading.visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+
+      .scene-loading__inner {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        color: rgba(255, 255, 255, 0.88);
+        font: 600 13px/1.1 "SF Pro Display", "Segoe UI", sans-serif;
+        letter-spacing: 0.04em;
+      }
+
+      .scene-loading__emoji {
+        font-size: 22px;
+        animation: scene-loading-float 0.9s ease-in-out infinite alternate;
+      }
+
+      .scene-loading__label {
+        text-transform: uppercase;
+      }
+
+      @keyframes scene-loading-float {
+        from { transform: translateY(0) scale(0.98); }
+        to { transform: translateY(-4px) scale(1.04); }
+      }
+
       .dock-item {
         display: flex;
         align-items: center;
@@ -67,6 +116,7 @@
   </head>
   <body>
     <div id="canvas-container"></div>
+    <div id="scene-loading"></div>
     <div id="dock"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

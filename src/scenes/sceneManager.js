@@ -32,6 +32,39 @@ export class SceneManager {
 
     /** @type {Map<import('matter-js').Body, import('pixi.js').Sprite>} */
     this.bodyToSprite = new Map();
+    this.switchToken = 0;
+    this.loadingEl = this.createLoadingOverlay();
+  }
+
+  createLoadingOverlay() {
+    const el = document.getElementById('scene-loading') || document.createElement('div');
+    el.id = 'scene-loading';
+    el.innerHTML = '<div class="scene-loading__inner"><div class="scene-loading__emoji">👀</div><div class="scene-loading__label">Loading scene</div></div>';
+    if (!el.parentNode) {
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  setLoadingState(visible, sceneId) {
+    if (!this.loadingEl) return;
+    const emojiMap = {
+      apple: '🍎',
+      eyes: '👀',
+      heart: '❤️',
+      laptop: '💻',
+      galaxy: '🌌',
+    };
+    const emojiEl = this.loadingEl.querySelector('.scene-loading__emoji');
+    const labelEl = this.loadingEl.querySelector('.scene-loading__label');
+    if (emojiEl) emojiEl.textContent = emojiMap[sceneId] || '✨';
+    if (labelEl) labelEl.textContent = visible ? `Loading ${sceneId}` : '';
+    this.loadingEl.classList.toggle('visible', visible);
+  }
+
+  async waitForNextPaint() {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
 
   // ── Body↔Sprite 생명주기 ──────────────────────
@@ -79,6 +112,7 @@ export class SceneManager {
    * @param {string} sceneId
    */
   async switchTo(sceneId) {
+    const token = ++this.switchToken;
     if (this.current) {
       this.current.teardown(this.app, this.physics);
     }
@@ -94,7 +128,17 @@ export class SceneManager {
 
     this.current = scene;
     this.currentId = sceneId;
-    await scene.setup(this.app, this.physics, this.renderer, this.textures, this);
+    this.setLoadingState(true, sceneId);
+
+    try {
+      await this.waitForNextPaint();
+      if (token !== this.switchToken) return;
+      await scene.setup(this.app, this.physics, this.renderer, this.textures, this);
+    } finally {
+      if (token === this.switchToken) {
+        this.setLoadingState(false, sceneId);
+      }
+    }
   }
 
   // ── 매 프레임 ──────────────────────────────────

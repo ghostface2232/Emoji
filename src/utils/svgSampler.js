@@ -78,6 +78,210 @@ function transformPoints(points, srcBBox, bounds) {
   }));
 }
 
+function createFillContext(pathData) {
+  const { svg, paths, bbox } = createSVGPaths(pathData);
+  const point = svg.createSVGPoint();
+  const edgeSamples = [];
+
+  for (const path of paths) {
+    const length = path.getTotalLength();
+    const samples = Math.max(240, Math.round(length * 2.4));
+    for (let i = 0; i < samples; i++) {
+      const pt = path.getPointAtLength((i / samples) * length);
+      edgeSamples.push({ x: pt.x, y: pt.y });
+    }
+  }
+
+  function isInside(x, y) {
+    point.x = x;
+    point.y = y;
+    return paths.some((path) => path.isPointInFill(point));
+  }
+
+  function distToEdge(x, y) {
+    let min = Infinity;
+    for (const sample of edgeSamples) {
+      const dx = x - sample.x;
+      const dy = y - sample.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < min) min = dist;
+    }
+    return min;
+  }
+
+  return { svg, paths, bbox, isInside, distToEdge };
+}
+
+function estimateFillArea(bbox, isInside) {
+  const step = Math.max(Math.min(bbox.width, bbox.height) / 120, 0.75);
+  let insideCount = 0;
+
+  for (let y = bbox.y + step * 0.5; y < bbox.y + bbox.height; y += step) {
+    for (let x = bbox.x + step * 0.5; x < bbox.x + bbox.width; x += step) {
+      if (isInside(x, y)) insideCount++;
+    }
+  }
+
+  return insideCount * step * step;
+}
+
+function hashNoise(x, y) {
+  const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return value - Math.floor(value);
+}
+
+function generatePackedCandidates(context, spacing, options = {}) {
+  const {
+    bbox,
+    isInside,
+    distToEdge,
+  } = context;
+  const {
+    jitterRatio = 0.18,
+    edgeInsetRatio = 0.24,
+    rowOffsetJitter = 0.18,
+    scoreFn = null,
+  } = options;
+
+  const rowHeight = spacing * Math.sqrt(3) / 2;
+  const edgeInset = spacing * edgeInsetRatio;
+  const candidates = [];
+  let row = 0;
+
+  for (let y = bbox.y + rowHeight * 0.55; y <= bbox.y + bbox.height - rowHeight * 0.2; y += rowHeight, row++) {
+    const rowDrift = (hashNoise(row * 11.3, spacing * 0.17) - 0.5) * spacing * rowOffsetJitter;
+    const offsetX = (row % 2) * (spacing / 2) + rowDrift;
+
+    for (let x = bbox.x + spacing * 0.55 + offsetX; x <= bbox.x + bbox.width - spacing * 0.2; x += spacing) {
+      const jitterX = (hashNoise(x, y) - 0.5) * spacing * jitterRatio;
+      const jitterY = (hashNoise(y + 19.19, x + 7.73) - 0.5) * rowHeight * jitterRatio * 1.2;
+      const px = x + jitterX;
+      const py = y + jitterY;
+
+      if (!isInside(px, py)) continue;
+
+      const edgeDist = distToEdge(px, py);
+      if (edgeDist < edgeInset) continue;
+
+      candidates.push({
+        x: px,
+        y: py,
+        anchorX: px,
+        anchorY: py,
+        edgeDist,
+        noise: hashNoise(px + 3.1, py + 1.7),
+        score: scoreFn ? scoreFn({ x: px, y: py, edgeDist }) : 0,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function selectPackedSubset(candidates, count, spacing) {
+  if (candidates.length <= count) {
+    return candidates.slice();
+  }
+
+  const ordered = candidates
+    .slice()
+    .sort((a, b) => (
+      b.edgeDist + b.noise * spacing * 0.2 + b.score * spacing -
+      (a.edgeDist + a.noise * spacing * 0.2 + a.score * spacing)
+    ));
+  const selected = [];
+  let minDist = spacing * 0.74;
+
+  while (selected.length < count && minDist > spacing * 0.42) {
+    for (let i = 0; i < ordered.length; i++) {
+      if (selected.length >= count) break;
+
+      const candidate = ordered[i];
+      let blocked = false;
+
+      for (let j = 0; j < selected.length; j++) {
+        const dx = candidate.x - selected[j].x;
+        const dy = candidate.y - selected[j].y;
+        if (dx * dx + dy * dy < minDist * minDist) {
+          blocked = true;
+          break;
+        }
+      }
+
+      if (!blocked) {
+        selected.push(candidate);
+      }
+    }
+
+    minDist *= 0.94;
+  }
+
+  if (selected.length < count) {
+    for (let i = 0; i < ordered.length && selected.length < count; i++) {
+      if (!selected.includes(ordered[i])) {
+        selected.push(ordered[i]);
+      }
+    }
+  }
+
+  return selected.slice(0, count);
+}
+
+function relaxPackedPoints(points, context, spacing, options = {}) {
+  const {
+    isInside,
+    distToEdge,
+  } = context;
+  const {
+    iterations = 5,
+    edgeInsetRatio = 0.24,
+  } = options;
+
+  const minEdge = spacing * edgeInsetRatio * 0.8;
+  let relaxed = points.map((point) => ({ ...point }));
+
+  for (let iter = 0; iter < iterations; iter++) {
+    relaxed = relaxed.map((point, index) => {
+      let fx = (point.anchorX - point.x) * 0.035;
+      let fy = (point.anchorY - point.y) * 0.035;
+
+      for (let j = 0; j < relaxed.length; j++) {
+        if (j === index) continue;
+
+        const other = relaxed[j];
+        const dx = point.x - other.x;
+        const dy = point.y - other.y;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq === 0 || distSq > spacing * spacing) continue;
+
+        const dist = Math.sqrt(distSq);
+        const overlap = spacing - dist;
+        const nx = dist > 0.0001 ? dx / dist : Math.cos((index + 1) * 1.618);
+        const ny = dist > 0.0001 ? dy / dist : Math.sin((index + 1) * 1.618);
+
+        fx += nx * overlap * 0.22;
+        fy += ny * overlap * 0.22;
+      }
+
+      const nextX = point.x + fx;
+      const nextY = point.y + fy;
+
+      if (isInside(nextX, nextY) && distToEdge(nextX, nextY) >= minEdge) {
+        return { ...point, x: nextX, y: nextY };
+      }
+
+      if (isInside(point.anchorX, point.anchorY) && distToEdge(point.anchorX, point.anchorY) >= minEdge) {
+        return { ...point, x: point.anchorX, y: point.anchorY };
+      }
+
+      return point;
+    });
+  }
+
+  return relaxed;
+}
+
 // ── 1. 외곽선 균등 샘플링 ───────────────────────────────
 
 /**
@@ -189,6 +393,94 @@ export function samplePointsFromFill(pathData, numPoints, bounds, options = {}) 
 
   removeSVG(svg);
   return transformPoints(raw, bbox, bounds);
+}
+
+/**
+ * SVG 내부를 조밀하게 채우되, 완전히 기계적인 격자로 보이지 않도록
+ * 약한 jitter + local relaxation을 거친 패킹 포인트를 만든다.
+ *
+ * @param {string | string[]} pathData
+ * @param {number} numPoints
+ * @param {{ x: number, y: number, width: number, height: number }} bounds
+ * @param {{ jitterRatio?: number, edgeInsetRatio?: number, relaxIterations?: number }} [options]
+ * @returns {{ x: number, y: number }[]}
+ */
+export function samplePackedPointsFromFill(pathData, numPoints, bounds, options = {}) {
+  const context = createFillContext(pathData);
+  const { svg, bbox, isInside } = context;
+  const {
+    jitterRatio = 0.18,
+    edgeInsetRatio = 0.24,
+    relaxIterations = 5,
+    spacingScale = 1,
+    rowOffsetJitter = 0.18,
+    scoreFn = null,
+  } = options;
+
+  const fillArea = estimateFillArea(bbox, isInside);
+  const packingDensity = Math.sqrt(3) / 2;
+  const baseSpacing = Math.sqrt(fillArea / (Math.max(numPoints, 1) * packingDensity));
+
+  let low = baseSpacing * 0.72;
+  let high = baseSpacing * 1.28;
+  let chosen = generatePackedCandidates(context, low, {
+    jitterRatio,
+    edgeInsetRatio,
+    rowOffsetJitter,
+    scoreFn,
+  });
+
+  for (let i = 0; i < 10; i++) {
+    const mid = (low + high) * 0.5;
+    const candidates = generatePackedCandidates(context, mid, {
+      jitterRatio,
+      edgeInsetRatio,
+      rowOffsetJitter,
+      scoreFn,
+    });
+
+    if (candidates.length >= numPoints) {
+      chosen = candidates;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  while (chosen.length < numPoints) {
+    low *= 0.94;
+    chosen = generatePackedCandidates(context, low, {
+      jitterRatio,
+      edgeInsetRatio,
+      rowOffsetJitter,
+      scoreFn,
+    });
+  }
+
+  const denseSpacing = low * spacingScale;
+  const denseCandidates = generatePackedCandidates(context, denseSpacing, {
+    jitterRatio,
+    edgeInsetRatio,
+    rowOffsetJitter,
+    scoreFn,
+  });
+  const selected = selectPackedSubset(denseCandidates, numPoints, denseSpacing);
+  const relaxed = relaxPackedPoints(selected, context, denseSpacing, {
+    iterations: relaxIterations,
+    edgeInsetRatio,
+  });
+
+  removeSVG(svg);
+
+  const sorted = relaxed
+    .map(({ x, y }) => ({ x, y }))
+    .sort((a, b) => {
+      const rowGap = denseSpacing * 0.6;
+      if (Math.abs(a.y - b.y) > rowGap) return a.y - b.y;
+      return a.x - b.x;
+    });
+
+  return transformPoints(sorted, bbox, bounds);
 }
 
 // ── 3. 육각형 격자 채우기 ────────────────────────────────

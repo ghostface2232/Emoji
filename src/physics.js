@@ -115,14 +115,30 @@ export class PhysicsWorld {
    * @param {number} y
    * @returns {Matter.Body}
    */
-  createParticleAt(x, y) {
-    const body = Bodies.circle(x, y, 14, {
-      restitution: 0.5,
-      friction: 0.3,
-      frictionAir: 0.02,
-      collisionFilter: { group: -1 },
+  createParticleAt(x, y, options = {}) {
+    const {
+      radius = 14,
+      restitution = 0.5,
+      friction = 0.3,
+      frictionAir = 0.02,
+      collisionGroup = -1,
+      lockRotation = false,
+    } = options;
+
+    const body = Bodies.circle(x, y, radius, {
+      restitution,
+      friction,
+      frictionAir,
+      inertia: lockRotation ? Infinity : undefined,
+      collisionFilter: { group: collisionGroup },
     });
     body.targetPosition = null;
+
+    if (lockRotation) {
+      Body.setAngle(body, 0);
+      Body.setAngularVelocity(body, 0);
+    }
+
     Composite.add(this.world, [body]);
     this.particles.push(body);
     return body;
