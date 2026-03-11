@@ -1,0 +1,20 @@
+/**
+ * Heart 장면 – ❤️ 이모지로 하트 형상을 구성한다.
+ */
+export const heartScene = {
+  async setup(app, engine) {
+    // TODO
+  },
+
+  update(app, engine, dt) {
+    // TODO
+  },
+
+  teardown(app, engine) {
+    // TODO
+  },
+
+  onPointerDown(app, engine, x, y) {
+    // TODO
+  },
+};
