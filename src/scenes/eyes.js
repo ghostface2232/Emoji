@@ -43,6 +43,7 @@ const INNER_SWAY_SPEED = 1.05;
 const MOTION_STRETCH_X = 0.08;
 const MOTION_SQUASH_Y = 0.03;
 const ELLIPSE_PARALLAX_EXTRA = 0.25;
+const ELLIPSE_INFLUENCE_RADIUS = 0.6;
 
 const SVG_WIDTH = 89.7881;
 const SVG_HEIGHT = 69.0186;
@@ -59,13 +60,17 @@ function smoothstep(t) {
   return clamped * clamped * (3 - 2 * clamped);
 }
 
-function isInsideInnerEllipse(normX, normY) {
+function ellipseInfluence(normX, normY) {
+  let maxInfluence = 0;
   for (const e of INNER_ELLIPSES) {
     const dx = (normX - e.cx) / e.rx;
     const dy = (normY - e.cy) / e.ry;
-    if (dx * dx + dy * dy <= 1) return true;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= 1) continue;
+    const influence = Math.max(0, 1 - (dist - 1) / ELLIPSE_INFLUENCE_RADIUS);
+    if (influence > maxInfluence) maxInfluence = influence;
   }
-  return false;
+  return maxInfluence;
 }
 
 function getEyeLayout(app) {
@@ -395,7 +400,7 @@ function syncIdleTargets() {
       Math.cos(swayTime * 0.9 + normalizedX * 1.7 - normalizedY * 1.2) *
         state.packingDistance * INNER_SWAY_Y;
 
-    const ellipseExtra = target.inEllipse ? sharedLookOffset * ELLIPSE_PARALLAX_EXTRA : 0;
+    const ellipseExtra = target.ellipseInfluence * sharedLookOffset * ELLIPSE_PARALLAX_EXTRA;
     target.x =
       eyeCenter.x +
       relativeX * sharedScale * directionalScaleX +
@@ -485,7 +490,7 @@ export const eyesScene = {
         x: target.baseX,
         y: target.baseY,
         eyeIndex: target.eyeIndex,
-        inEllipse: isInsideInnerEllipse(normX, normY),
+        ellipseInfluence: ellipseInfluence(normX, normY),
       };
     });
     const { packingDistance, bodyRadius } = cached;
