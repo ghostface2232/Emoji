@@ -34,6 +34,7 @@ export class SceneManager {
     this.bodyToSprite = new Map();
     this.switchToken = 0;
     this.loadingEl = this.createLoadingOverlay();
+    this.prewarmPromises = new Map();
   }
 
   createLoadingOverlay() {
@@ -65,6 +66,23 @@ export class SceneManager {
   async waitForNextPaint() {
     await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  prewarm(sceneId) {
+    const scene = SCENE_MAP[sceneId];
+    if (!scene || !scene.prewarm) return Promise.resolve();
+    if (this.prewarmPromises.has(sceneId)) {
+      return this.prewarmPromises.get(sceneId);
+    }
+
+    const promise = Promise.resolve(
+      scene.prewarm(this.app, this.physics, this.renderer, this.textures, this)
+    ).finally(() => {
+      this.prewarmPromises.delete(sceneId);
+    });
+
+    this.prewarmPromises.set(sceneId, promise);
+    return promise;
   }
 
   // ── Body↔Sprite 생명주기 ──────────────────────

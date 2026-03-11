@@ -77,6 +77,35 @@ function getLayoutCacheKey(bounds) {
   ].join(':');
 }
 
+function resolveEyesCache(bounds) {
+  const cacheKey = getLayoutCacheKey(bounds);
+  let cached = eyesTargetCache.get(cacheKey);
+
+  if (!cached) {
+    const sampledTargets = sampleEyeTargets(bounds, PARTICLE_COUNT, 0);
+    const packingDistance = measurePackingDistance(sampledTargets.map((target) => ({
+      x: target.baseX,
+      y: target.baseY,
+    })));
+    const bodyRadius = Math.max(9.25, packingDistance * BODY_RADIUS_RATIO);
+
+    cached = {
+      finalTargets: sampledTargets.map((target) => ({
+        baseX: target.baseX,
+        baseY: target.baseY,
+        x: target.baseX,
+        y: target.baseY,
+        eyeIndex: target.eyeIndex,
+      })),
+      packingDistance,
+      bodyRadius,
+    };
+    eyesTargetCache.set(cacheKey, cached);
+  }
+
+  return cached;
+}
+
 function selectEvenSubset(points, count) {
   if (points.length <= count) return points.slice();
 
@@ -421,33 +450,14 @@ function updatePhase(app, dt) {
 }
 
 export const eyesScene = {
+  async prewarm(app) {
+    const layout = getEyeLayout(app);
+    resolveEyesCache(layout.eye);
+  },
+
   async setup(app, physics, renderer, textures, sceneManager) {
     const layout = getEyeLayout(app);
-    const cacheKey = getLayoutCacheKey(layout.eye);
-    let cached = eyesTargetCache.get(cacheKey);
-
-    if (!cached) {
-      const sampledTargets = sampleEyeTargets(layout.eye, PARTICLE_COUNT, 0);
-      const packingDistance = measurePackingDistance(sampledTargets.map((target) => ({
-        x: target.baseX,
-        y: target.baseY,
-      })));
-      const bodyRadius = Math.max(9.25, packingDistance * BODY_RADIUS_RATIO);
-
-      cached = {
-        finalTargets: sampledTargets.map((target) => ({
-          baseX: target.baseX,
-          baseY: target.baseY,
-          x: target.baseX,
-          y: target.baseY,
-          eyeIndex: target.eyeIndex,
-        })),
-        packingDistance,
-        bodyRadius,
-      };
-      eyesTargetCache.set(cacheKey, cached);
-    }
-
+    const cached = resolveEyesCache(layout.eye);
     const finalTargets = cached.finalTargets.map((target) => ({ ...target }));
     const runtimeTargets = finalTargets.map((target) => ({
       x: target.baseX,

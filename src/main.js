@@ -5,6 +5,15 @@ import { initDock } from './dock.js';
 import { initInteractions } from './interactions.js';
 import { SceneManager } from './scenes/sceneManager.js';
 
+function scheduleIdle(task) {
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(() => task(), { timeout: 1500 });
+    return;
+  }
+
+  window.setTimeout(task, 300);
+}
+
 async function boot() {
   // 1. PixiJS 초기화
   const renderer = new Renderer();
@@ -32,8 +41,11 @@ async function boot() {
     sceneManager.update(dt);
   });
 
-  // 8. 기본 장면 로드
-  sceneManager.switchTo('apple');
+  // 초기에는 아무 장면도 선택하지 않은 idle 상태로 시작한다.
+  // 눈 장면 캐시는 백그라운드 idle 시간에 미리 준비한다.
+  scheduleIdle(() => {
+    sceneManager.prewarm('eyes');
+  });
 }
 
 boot().catch(console.error);
