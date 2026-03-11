@@ -42,6 +42,15 @@ const INNER_SWAY_Y = 0.12;
 const INNER_SWAY_SPEED = 1.05;
 const MOTION_STRETCH_X = 0.08;
 const MOTION_SQUASH_Y = 0.03;
+const ELLIPSE_PARALLAX_EXTRA = 0.25;
+const ELLIPSE_INFLUENCE_RADIUS = 0.6;
+
+const SVG_WIDTH = 89.7881;
+const SVG_HEIGHT = 69.0186;
+const INNER_ELLIPSES = [
+  { cx: 23.2354 / SVG_WIDTH, cy: 39.167 / SVG_HEIGHT, rx: 13.357 / SVG_WIDTH, ry: 16.415 / SVG_HEIGHT },
+  { cx: 66.9805 / SVG_WIDTH, cy: 39.167 / SVG_HEIGHT, rx: 13.357 / SVG_WIDTH, ry: 16.415 / SVG_HEIGHT },
+];
 
 let state = null;
 const eyesTargetCache = new Map();
@@ -49,6 +58,19 @@ const eyesTargetCache = new Map();
 function smoothstep(t) {
   const clamped = Math.max(0, Math.min(1, t));
   return clamped * clamped * (3 - 2 * clamped);
+}
+
+function ellipseInfluence(normX, normY) {
+  let maxInfluence = 0;
+  for (const e of INNER_ELLIPSES) {
+    const dx = (normX - e.cx) / e.rx;
+    const dy = (normY - e.cy) / e.ry;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= 1) continue;
+    const influence = Math.max(0, 1 - (dist - 1) / ELLIPSE_INFLUENCE_RADIUS);
+    if (influence > maxInfluence) maxInfluence = influence;
+  }
+  return maxInfluence;
 }
 
 function getEyeLayout(app) {
@@ -378,10 +400,12 @@ function syncIdleTargets() {
       Math.cos(swayTime * 0.9 + normalizedX * 1.7 - normalizedY * 1.2) *
         state.packingDistance * INNER_SWAY_Y;
 
+    const ellipseExtra = target.ellipseInfluence * sharedLookOffset * ELLIPSE_PARALLAX_EXTRA;
     target.x =
       eyeCenter.x +
       relativeX * sharedScale * directionalScaleX +
       sharedLookOffset +
+      ellipseExtra +
       localSwayX;
     target.y =
       eyeCenter.y +
@@ -459,11 +483,16 @@ export const eyesScene = {
     const layout = getEyeLayout(app);
     const cached = resolveEyesCache(layout.eye);
     const finalTargets = cached.finalTargets.map((target) => ({ ...target }));
-    const runtimeTargets = finalTargets.map((target) => ({
-      x: target.baseX,
-      y: target.baseY,
-      eyeIndex: target.eyeIndex,
-    }));
+    const runtimeTargets = finalTargets.map((target) => {
+      const normX = (target.baseX - layout.eye.x) / layout.eye.width;
+      const normY = (target.baseY - layout.eye.y) / layout.eye.height;
+      return {
+        x: target.baseX,
+        y: target.baseY,
+        eyeIndex: target.eyeIndex,
+        ellipseInfluence: ellipseInfluence(normX, normY),
+      };
+    });
     const { packingDistance, bodyRadius } = cached;
 
     physics.setGravity(0, 0);
