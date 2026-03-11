@@ -46,6 +46,55 @@ const PARAM_COUNT = {
 
 let state = null;
 
+function createLeafTester(fullPathData, bounds) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+  document.body.appendChild(svg);
+
+  const dList = Array.isArray(fullPathData) ? fullPathData : [fullPathData];
+  const allPaths = dList.map((d) => {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+    return p;
+  });
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of allPaths) {
+    const b = p.getBBox();
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  const bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+
+  const leafPathEl = allPaths[1];
+
+  const scaleX = bounds.width / bbox.width;
+  const scaleY = bounds.height / bbox.height;
+  const scale = Math.min(scaleX, scaleY);
+  const fitW = bbox.width * scale;
+  const fitH = bbox.height * scale;
+  const offX = bounds.x + (bounds.width - fitW) / 2;
+  const offY = bounds.y + (bounds.height - fitH) / 2;
+
+  const point = svg.createSVGPoint();
+
+  function isInLeaf(screenX, screenY) {
+    point.x = ((screenX - offX) / fitW) * bbox.width + bbox.x;
+    point.y = ((screenY - offY) / fitH) * bbox.height + bbox.y;
+    return leafPathEl.isPointInFill(point);
+  }
+
+  function cleanup() {
+    document.body.removeChild(svg);
+  }
+
+  return { isInLeaf, cleanup };
+}
+
 function formatPathNumber(value) {
   return Number(value.toFixed(4)).toString();
 }
@@ -248,7 +297,8 @@ function updatePhase(dt) {
         x: (Math.random() - 0.5) * 0.7,
         y: 1.15 + Math.random() * 1.05,
       });
-      state.sceneManager.addSprite(body, state.tex);
+      const tex = state.leafFlags[state.spawned] ? state.leafTex : state.tex;
+      state.sceneManager.addSprite(body, tex);
       state.bodies.push(body);
       state.spawned++;
     }
@@ -304,11 +354,17 @@ export const appleScene = {
     const bodyRadius = Math.max(8.5, packingDistance * BODY_RADIUS_RATIO);
     const idleSeeds = finalTargets.map(() => Math.random());
 
+    const { isInLeaf, cleanup: cleanupLeafTester } = createLeafTester(APPLE_SHAPE_PATH, bounds);
+    const leafFlags = finalTargets.map((t) => isInLeaf(t.x, t.y));
+    cleanupLeafTester();
+
     physics.setGravity(0, 0);
 
     state = {
       bounds,
       tex: textures.get(app, '🍎', 32),
+      leafTex: textures.get(app, '🍏', 32),
+      leafFlags,
       bodies: [],
       finalTargets,
       runtimeTargets,
