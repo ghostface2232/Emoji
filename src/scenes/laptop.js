@@ -3,6 +3,9 @@ import { LAPTOP_PATH, samplePackedPointsFromFill } from '../utils/svgSampler.js'
 import { lerp } from '../utils/easing.js';
 
 const PARTICLE_COUNT = 400;
+const LOADER_ICON_COUNT = 5;
+const LOADER_TARGET_OVERSAMPLE = 28;
+const LOADER_ROTATION_SPEED = 1.2;
 const BASE_FORM_DURATION = 2.45;
 const FORM_DURATION_VARIATION = 0.15;
 const SEGMENT_COUNT_MIN = 4;
@@ -96,16 +99,48 @@ function resolveLaptopCache(bounds) {
   let cached = laptopTargetCache.get(cacheKey);
 
   if (!cached) {
-    const finalTargets = samplePackedPointsFromFill(LAPTOP_PATH, PARTICLE_COUNT, bounds, {
+    const laptopTargetCount = PARTICLE_COUNT - LOADER_ICON_COUNT;
+    const candidateTargets = samplePackedPointsFromFill(
+      LAPTOP_PATH,
+      laptopTargetCount + LOADER_TARGET_OVERSAMPLE,
+      bounds,
+      {
       jitterRatio: 0.14,
       edgeInsetRatio: 0.08,
       relaxIterations: 8,
       spacingScale: 0.94,
       rowOffsetJitter: 0.12,
-    }).map((point) => ({
+      }
+    ).map((point) => ({
       x: point.x,
       y: point.y,
     }));
+
+    const candidateSpacing = measurePackingDistance(candidateTargets);
+    const loaderTargets = createLoaderTargets(bounds, candidateSpacing);
+    const loaderCenter = getLoaderCenter(bounds);
+    const exclusionRadius = Math.max(candidateSpacing * 2.45, bounds.height * 0.055);
+    const laptopTargets = candidateTargets
+      .filter((point) => Math.hypot(point.x - loaderCenter.x, point.y - loaderCenter.y) > exclusionRadius)
+      .slice(0, laptopTargetCount)
+      .map((point) => ({
+        x: point.x,
+        y: point.y,
+        isLoader: false,
+      }));
+    if (laptopTargets.length < laptopTargetCount) {
+      for (const point of candidateTargets) {
+        if (laptopTargets.length >= laptopTargetCount) break;
+        if (!laptopTargets.some((target) => target.x === point.x && target.y === point.y)) {
+          laptopTargets.push({
+            x: point.x,
+            y: point.y,
+            isLoader: false,
+          });
+        }
+      }
+    }
+    const finalTargets = laptopTargets.concat(loaderTargets);
 
     const packingDistance = measurePackingDistance(finalTargets);
     const bodyRadius = Math.max(8.5, packingDistance * BODY_RADIUS_RATIO);
@@ -119,6 +154,32 @@ function resolveLaptopCache(bounds) {
   }
 
   return cached;
+}
+
+function getLoaderCenter(bounds) {
+  return {
+    x: bounds.x + bounds.width * 0.5,
+    y: bounds.y + bounds.height * 0.37,
+  };
+}
+
+function createLoaderTargets(bounds, spacing) {
+  const center = getLoaderCenter(bounds);
+  const radius = Math.max(spacing * 1.55, bounds.height * 0.026);
+  const targets = [];
+
+  for (let i = 0; i < LOADER_ICON_COUNT; i++) {
+    const angle = -Math.PI * 0.5 + (Math.PI * 2 * i) / LOADER_ICON_COUNT;
+    targets.push({
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius,
+      isLoader: true,
+      loaderAngle: angle,
+      loaderRadius: radius,
+    });
+  }
+
+  return targets;
 }
 
 function getEdgeSpawnData(app, index) {
@@ -411,6 +472,31 @@ function executeOrthogonalMotion(dt) {
   return activeCount;
 }
 
+function getSpringBodies() {
+  const springBodies = [];
+
+  for (let i = 0; i < state.bodies.length; i++) {
+    const motion = state.motions[i];
+    if (motion && motion.mode === 'path') continue;
+    springBodies.push(state.bodies[i]);
+  }
+
+  return springBodies;
+}
+
+function syncLoaderTargets(dt) {
+  state.loaderRotation += dt * LOADER_ROTATION_SPEED;
+
+  for (let i = 0; i < state.runtimeTargets.length; i++) {
+    const base = state.finalTargets[i];
+    if (!base.isLoader) continue;
+
+    const angle = base.loaderAngle + state.loaderRotation;
+    state.runtimeTargets[i].x = state.loaderCenter.x + Math.cos(angle) * base.loaderRadius;
+    state.runtimeTargets[i].y = state.loaderCenter.y + Math.sin(angle) * base.loaderRadius;
+  }
+}
+
 function getSpringProfile() {
   if (state.phase === 'recover') {
     const recoverT = Math.min(state.recoverElapsed / RECOVER_DURATION, 1);
@@ -480,9 +566,11 @@ export const laptopScene = {
   async setup(app, physics, renderer, textures, sceneManager) {
     const bounds = getLaptopBounds(app);
     const cached = resolveLaptopCache(bounds);
-    const finalTargets = cached.finalTargets.map((target) => ({ ...target }));
-    const runtimeTargets = finalTargets.map((target) => ({ ...target }));
-    const shuffledTargets = shuffleInPlace(finalTargets.map((target) => ({ ...target })));
+    const assignedTargets = shuffleInPlace(cached.finalTargets.map((target) => ({ ...target })));
+    const runtimeTargets = assignedTargets.map((target) => ({
+      x: target.x,
+      y: target.y,
+    }));
     const tex = textures.get(app, '💻', 32);
     const motions = [];
     const bodies = [];
@@ -493,7 +581,7 @@ export const laptopScene = {
       const spawn = getEdgeSpawnData(app, i);
       const startPos = spawn.start;
       const stagePos = spawn.stage;
-      const endPos = shuffledTargets[i];
+      const endPos = assignedTargets[i];
       const body = physics.createParticleAt(startPos.x, startPos.y, {
         radius: cached.bodyRadius,
         restitution: 0,
@@ -509,20 +597,19 @@ export const laptopScene = {
       motions.push(createMotionPlan(startPos, stagePos, endPos));
       bodies.push(body);
       sceneManager.addSprite(body, tex);
-
-      runtimeTargets[i].x = endPos.x;
-      runtimeTargets[i].y = endPos.y;
     }
 
     state = {
       physics,
       sceneManager,
-      finalTargets: runtimeTargets,
+      finalTargets: assignedTargets,
       runtimeTargets,
       motions,
       bodies,
       packingDistance: cached.packingDistance,
       bodyRadius: cached.bodyRadius,
+      loaderCenter: getLoaderCenter(bounds),
+      loaderRotation: 0,
       phase: 'routing',
       recoverElapsed: RECOVER_DURATION,
     };
@@ -544,13 +631,17 @@ export const laptopScene = {
       }
     }
 
+    if (state.phase !== 'routing') {
+      syncLoaderTargets(dt);
+    }
+
     const { stiffness, damping } = getSpringProfile();
     applyLaptopSpringForces(stiffness, damping);
 
-    const hasSpringBodies = state.motions.some((motion) => motion.mode !== 'path');
-    if (hasSpringBodies) {
+    const springBodies = getSpringBodies();
+    if (springBodies.length > 1) {
       physics.applySeparation(
-        state.bodies,
+        springBodies,
         state.packingDistance * SETTLED_SEPARATION_RATIO,
         SETTLED_SEPARATION_STRENGTH
       );
@@ -568,7 +659,9 @@ export const laptopScene = {
       });
     }
 
-    constrainBodiesToViewport(app);
+    if (state.phase !== 'recover') {
+      constrainBodiesToViewport(app);
+    }
   },
 
   teardown() {
