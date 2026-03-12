@@ -8,6 +8,7 @@ const SHAPE_OFFSET_Y = -0.045;
 const LEAF_SCALE = 1.12;
 const LEAF_ORIGIN_X = 41.5;
 const LEAF_ORIGIN_Y = 12.5;
+const LEAF_SCORE_BOOST = 5.2;
 const SPAWN_DURATION = 0.92;
 const SETTLE_DURATION = 1.28;
 const MAX_STIFFNESS = 0.04;
@@ -334,54 +335,33 @@ export const appleScene = {
     const bounds = getShapeBounds(app);
     const leafMetrics = getLeafMetrics(bounds);
     const leafBandY = leafMetrics.topY + leafMetrics.height * 0.72;
+    const { isInLeaf, cleanup: cleanupLeafTester } = createLeafTester(APPLE_SHAPE_PATH, bounds);
     const finalTargets = samplePackedPointsFromFill(APPLE_SHAPE_PATH, PARTICLE_COUNT, bounds, {
-      jitterRatio: 0.24,
-      edgeInsetRatio: 0.12,
-      relaxIterations: 7,
-      spacingScale: 0.87,
-      rowOffsetJitter: 0.26,
-      scoreFn: ({ x, y }) => {
-        const topBias = Math.max(0, 1 - (y - bounds.y) / Math.max(bounds.height * 0.38, 1));
-        const leafCenterBias = Math.max(0, 1 - Math.abs(x - leafMetrics.centerX) / Math.max(leafMetrics.width * 0.7, 1));
-        const leafBandBias = y <= leafBandY
-          ? 1.35
-          : Math.max(0, 1 - (y - leafBandY) / Math.max(bounds.height * 0.1, 1));
-        return topBias * leafCenterBias * leafBandBias * 2.1;
-      },
+        jitterRatio: 0.24,
+        edgeInsetRatio: 0.1,
+        relaxIterations: 7,
+        spacingScale: 0.85,
+        rowOffsetJitter: 0.26,
+        scoreFn: ({ x, y }) => {
+          const leafPoint = isInLeaf(x, y);
+          const topBias = Math.max(0, 1 - (y - bounds.y) / Math.max(bounds.height * 0.38, 1));
+          const leafCenterBias = Math.max(0, 1 - Math.abs(x - leafMetrics.centerX) / Math.max(leafMetrics.width * 0.7, 1));
+          const leafBandBias = y <= leafBandY
+            ? 1.35
+            : Math.max(0, 1 - (y - leafBandY) / Math.max(bounds.height * 0.1, 1));
+          const leafShapeBias = topBias * leafCenterBias * leafBandBias;
+          return leafPoint
+            ? LEAF_SCORE_BOOST + leafShapeBias * 2.6
+            : leafShapeBias * 0.35;
+        },
     });
     const runtimeTargets = finalTargets.map((target) => ({ ...target }));
     const packingDistance = measurePackingDistance(finalTargets);
     const bodyRadius = Math.max(8.5, packingDistance * BODY_RADIUS_RATIO);
     const idleSeeds = finalTargets.map(() => Math.random());
 
-    const { isInLeaf, cleanup: cleanupLeafTester } = createLeafTester(APPLE_SHAPE_PATH, bounds);
     const leafFlags = finalTargets.map((t) => isInLeaf(t.x, t.y));
     cleanupLeafTester();
-
-    // Expand leaf coverage: add nearest non-leaf points to fill out the leaf
-    const leafIndices = [];
-    const nonLeafIndices = [];
-    for (let i = 0; i < leafFlags.length; i++) {
-      if (leafFlags[i]) leafIndices.push(i);
-      else nonLeafIndices.push(i);
-    }
-    if (leafIndices.length > 0) {
-      const scored = nonLeafIndices.map((i) => {
-        let minDistSq = Infinity;
-        for (const li of leafIndices) {
-          const dx = finalTargets[i].x - finalTargets[li].x;
-          const dy = finalTargets[i].y - finalTargets[li].y;
-          const distSq = dx * dx + dy * dy;
-          if (distSq < minDistSq) minDistSq = distSq;
-        }
-        return { index: i, dist: minDistSq };
-      });
-      scored.sort((a, b) => a.dist - b.dist);
-      const extraLeafCount = 5;
-      for (let i = 0; i < Math.min(extraLeafCount, scored.length); i++) {
-        leafFlags[scored[i].index] = true;
-      }
-    }
 
     physics.setGravity(0, 0);
 
