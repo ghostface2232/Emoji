@@ -358,6 +358,31 @@ export const appleScene = {
     const leafFlags = finalTargets.map((t) => isInLeaf(t.x, t.y));
     cleanupLeafTester();
 
+    // Expand leaf coverage: add nearest non-leaf points to fill out the leaf
+    const leafIndices = [];
+    const nonLeafIndices = [];
+    for (let i = 0; i < leafFlags.length; i++) {
+      if (leafFlags[i]) leafIndices.push(i);
+      else nonLeafIndices.push(i);
+    }
+    if (leafIndices.length > 0) {
+      const scored = nonLeafIndices.map((i) => {
+        let minDistSq = Infinity;
+        for (const li of leafIndices) {
+          const dx = finalTargets[i].x - finalTargets[li].x;
+          const dy = finalTargets[i].y - finalTargets[li].y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < minDistSq) minDistSq = distSq;
+        }
+        return { index: i, dist: minDistSq };
+      });
+      scored.sort((a, b) => a.dist - b.dist);
+      const extraLeafCount = 5;
+      for (let i = 0; i < Math.min(extraLeafCount, scored.length); i++) {
+        leafFlags[scored[i].index] = true;
+      }
+    }
+
     physics.setGravity(0, 0);
 
     state = {
