@@ -54,12 +54,15 @@ export class SceneManager {
       eyes: '👀',
       heart: '❤️',
       laptop: '💻',
-      galaxy: '🌌',
+      galaxy: '⭐',
+    };
+    const labelMap = {
+      galaxy: 'stars',
     };
     const emojiEl = this.loadingEl.querySelector('.scene-loading__emoji');
     const labelEl = this.loadingEl.querySelector('.scene-loading__label');
     if (emojiEl) emojiEl.textContent = emojiMap[sceneId] || '✨';
-    if (labelEl) labelEl.textContent = visible ? `Loading ${sceneId}` : '';
+    if (labelEl) labelEl.textContent = visible ? `Loading ${labelMap[sceneId] || sceneId}` : '';
     this.loadingEl.classList.toggle('visible', visible);
   }
 

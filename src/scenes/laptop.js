@@ -4,7 +4,7 @@ import { lerp } from '../utils/easing.js';
 
 const PARTICLE_COUNT = 400;
 const LOADER_ICON_COUNT = 5;
-const LOADER_TARGET_OVERSAMPLE = 28;
+const LOADER_TARGET_OVERSAMPLE = 80;
 const LOADER_ROTATION_SPEED = 1.2;
 const BASE_FORM_DURATION = 2.45;
 const FORM_DURATION_VARIATION = 0.15;
@@ -30,7 +30,7 @@ const CLICK_EXPLOSION_RADIUS = 235;
 const CLICK_EXPLOSION_STRENGTH = 0.05;
 const BOUNDS_WIDTH = 0.76;
 const BOUNDS_HEIGHT = 0.54;
-const SVG_ASPECT = 109.418 / 79.9824;
+const SVG_ASPECT = 109.418 / 84.5;
 
 let state = null;
 const laptopTargetCache = new Map();
@@ -105,11 +105,11 @@ function resolveLaptopCache(bounds) {
       laptopTargetCount + LOADER_TARGET_OVERSAMPLE,
       bounds,
       {
-      jitterRatio: 0.14,
-      edgeInsetRatio: 0.08,
-      relaxIterations: 8,
-      spacingScale: 0.94,
-      rowOffsetJitter: 0.12,
+      jitterRatio: 0.02,
+      edgeInsetRatio: 0.05,
+      relaxIterations: 18,
+      spacingScale: 0.90,
+      rowOffsetJitter: 0.02,
       }
     ).map((point) => ({
       x: point.x,
