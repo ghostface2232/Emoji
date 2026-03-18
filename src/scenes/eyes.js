@@ -42,8 +42,10 @@ const INNER_SWAY_Y = 0.12;
 const INNER_SWAY_SPEED = 1.05;
 const MOTION_STRETCH_X = 0.08;
 const MOTION_SQUASH_Y = 0.03;
-const ELLIPSE_PARALLAX_EXTRA = 0.25;
-const ELLIPSE_INFLUENCE_RADIUS = 0.6;
+const ELLIPSE_PARALLAX_EXTRA = 0.7;
+const ELLIPSE_INFLUENCE_RADIUS = 0.7;
+const ELLIPSE_FILL_RADIUS = 2.0;
+const ELLIPSE_FILL_STRENGTH = 0.35;
 
 const SVG_WIDTH = 89.7881;
 const SVG_HEIGHT = 69.0186;
@@ -71,6 +73,19 @@ function ellipseInfluence(normX, normY) {
     if (influence > maxInfluence) maxInfluence = influence;
   }
   return maxInfluence;
+}
+
+function ellipseFillFactor(normX, normY) {
+  let maxFactor = 0;
+  for (const e of INNER_ELLIPSES) {
+    const dx = (normX - e.cx) / e.rx;
+    const dy = (normY - e.cy) / e.ry;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= 1) { maxFactor = 1; continue; }
+    const factor = Math.max(0, 1 - (dist - 1) / ELLIPSE_FILL_RADIUS);
+    if (factor > maxFactor) maxFactor = factor;
+  }
+  return maxFactor;
 }
 
 function getEyeLayout(app) {
@@ -401,11 +416,13 @@ function syncIdleTargets() {
         state.packingDistance * INNER_SWAY_Y;
 
     const ellipseExtra = target.ellipseInfluence * sharedLookOffset * ELLIPSE_PARALLAX_EXTRA;
+    const fillExtra = target.fillFactor * (1 - target.ellipseInfluence) * sharedLookOffset * ELLIPSE_FILL_STRENGTH;
     target.x =
       eyeCenter.x +
       relativeX * sharedScale * directionalScaleX +
       sharedLookOffset +
       ellipseExtra +
+      fillExtra +
       localSwayX;
     target.y =
       eyeCenter.y +
@@ -486,11 +503,13 @@ export const eyesScene = {
     const runtimeTargets = finalTargets.map((target) => {
       const normX = (target.baseX - layout.eye.x) / layout.eye.width;
       const normY = (target.baseY - layout.eye.y) / layout.eye.height;
+      const ei = ellipseInfluence(normX, normY);
       return {
         x: target.baseX,
         y: target.baseY,
         eyeIndex: target.eyeIndex,
-        ellipseInfluence: ellipseInfluence(normX, normY),
+        ellipseInfluence: ei,
+        fillFactor: ellipseFillFactor(normX, normY),
       };
     });
     const { packingDistance, bodyRadius } = cached;
