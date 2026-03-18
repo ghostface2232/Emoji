@@ -105,6 +105,17 @@ export class SceneManager {
   }
 
   /**
+   * Body? ?뭆prite ?띿뒪泥섎? 媛깆떊?쒕떎.
+   * @param {import('matter-js').Body} body
+   * @param {import('pixi.js').Texture} texture
+   */
+  setSpriteTexture(body, texture) {
+    const sprite = this.bodyToSprite.get(body);
+    if (!sprite) return;
+    sprite.texture = texture;
+  }
+
+  /**
    * Body와 대응 Sprite를 모두 제거한다.
    * @param {import('matter-js').Body} body
    */
@@ -171,6 +182,12 @@ export class SceneManager {
    * c. Body→Sprite 위치/회전 동기화
    * @param {number} dt
    */
+  onResize() {
+    if (this.current && this.current.resize) {
+      this.current.resize(this.app, this.physics, this.renderer, this.textures, this);
+    }
+  }
+
   update(dt) {
     // a. 장면별 로직 (스프링, 반발 등)
     if (this.current) {

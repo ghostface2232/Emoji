@@ -209,6 +209,46 @@ function getLeafMetrics(bounds) {
   };
 }
 
+function buildAppleLayout(app) {
+  const bounds = getShapeBounds(app);
+  const leafMetrics = getLeafMetrics(bounds);
+  const leafBandY = leafMetrics.topY + leafMetrics.height * 0.72;
+  const { isInLeaf, cleanup: cleanupLeafTester } = createLeafTester(APPLE_SHAPE_PATH, bounds);
+  const finalTargets = samplePackedPointsFromFill(APPLE_SHAPE_PATH, PARTICLE_COUNT, bounds, {
+    jitterRatio: 0.24,
+    edgeInsetRatio: 0.1,
+    relaxIterations: 7,
+    spacingScale: 0.85,
+    rowOffsetJitter: 0.26,
+    scoreFn: ({ x, y }) => {
+      const leafPoint = isInLeaf(x, y);
+      const topBias = Math.max(0, 1 - (y - bounds.y) / Math.max(bounds.height * 0.38, 1));
+      const leafCenterBias = Math.max(
+        0,
+        1 - Math.abs(x - leafMetrics.centerX) / Math.max(leafMetrics.width * 0.7, 1)
+      );
+      const leafBandBias = y <= leafBandY
+        ? 1.35
+        : Math.max(0, 1 - (y - leafBandY) / Math.max(bounds.height * 0.1, 1));
+      const leafShapeBias = topBias * leafCenterBias * leafBandBias;
+      return leafPoint
+        ? LEAF_SCORE_BOOST + leafShapeBias * 2.6
+        : leafShapeBias * 0.35;
+    },
+  });
+  const leafFlags = finalTargets.map((target) => isInLeaf(target.x, target.y));
+  const packingDistance = measurePackingDistance(finalTargets);
+  cleanupLeafTester();
+
+  return {
+    bounds,
+    finalTargets,
+    leafFlags,
+    packingDistance,
+    bodyRadius: Math.max(8.5, packingDistance * BODY_RADIUS_RATIO),
+  };
+}
+
 function smoothstep(t) {
   const clamped = Math.max(0, Math.min(1, t));
   return clamped * clamped * (3 - 2 * clamped);
@@ -223,6 +263,46 @@ function syncIdleTargets() {
 
     current.x = base.x + Math.sin(time + seed * 6.283) * IDLE_TARGET_SWAY_X;
     current.y = base.y + Math.cos(time * 0.82 + seed * 4.913) * IDLE_TARGET_SWAY_Y;
+  }
+}
+
+function applyAppleLayout(app) {
+  const layout = buildAppleLayout(app);
+
+  state.bounds = layout.bounds;
+  state.leafFlags = layout.leafFlags;
+  state.packingDistance = layout.packingDistance;
+  state.bodyRadius = layout.bodyRadius;
+
+  for (let i = 0; i < layout.finalTargets.length; i++) {
+    const next = layout.finalTargets[i];
+
+    if (state.finalTargets[i]) {
+      state.finalTargets[i].x = next.x;
+      state.finalTargets[i].y = next.y;
+    } else {
+      state.finalTargets.push({ ...next });
+    }
+
+    if (state.runtimeTargets[i]) {
+      state.runtimeTargets[i].x = next.x;
+      state.runtimeTargets[i].y = next.y;
+    } else {
+      state.runtimeTargets.push({ ...next });
+    }
+  }
+
+  state.finalTargets.length = layout.finalTargets.length;
+  state.runtimeTargets.length = layout.finalTargets.length;
+
+  if (state.phase === 'idle') {
+    syncIdleTargets();
+  }
+
+  for (let i = 0; i < state.bodies.length; i++) {
+    const body = state.bodies[i];
+    body.targetPosition = state.runtimeTargets[i];
+    state.sceneManager.setSpriteTexture(body, state.leafFlags[i] ? state.leafTex : state.tex);
   }
 }
 
@@ -332,49 +412,23 @@ function updatePhase(dt) {
 
 export const appleScene = {
   async setup(app, physics, renderer, textures, sceneManager) {
-    const bounds = getShapeBounds(app);
-    const leafMetrics = getLeafMetrics(bounds);
-    const leafBandY = leafMetrics.topY + leafMetrics.height * 0.72;
-    const { isInLeaf, cleanup: cleanupLeafTester } = createLeafTester(APPLE_SHAPE_PATH, bounds);
-    const finalTargets = samplePackedPointsFromFill(APPLE_SHAPE_PATH, PARTICLE_COUNT, bounds, {
-        jitterRatio: 0.24,
-        edgeInsetRatio: 0.1,
-        relaxIterations: 7,
-        spacingScale: 0.85,
-        rowOffsetJitter: 0.26,
-        scoreFn: ({ x, y }) => {
-          const leafPoint = isInLeaf(x, y);
-          const topBias = Math.max(0, 1 - (y - bounds.y) / Math.max(bounds.height * 0.38, 1));
-          const leafCenterBias = Math.max(0, 1 - Math.abs(x - leafMetrics.centerX) / Math.max(leafMetrics.width * 0.7, 1));
-          const leafBandBias = y <= leafBandY
-            ? 1.35
-            : Math.max(0, 1 - (y - leafBandY) / Math.max(bounds.height * 0.1, 1));
-          const leafShapeBias = topBias * leafCenterBias * leafBandBias;
-          return leafPoint
-            ? LEAF_SCORE_BOOST + leafShapeBias * 2.6
-            : leafShapeBias * 0.35;
-        },
-    });
+    const layout = buildAppleLayout(app);
+    const finalTargets = layout.finalTargets;
     const runtimeTargets = finalTargets.map((target) => ({ ...target }));
-    const packingDistance = measurePackingDistance(finalTargets);
-    const bodyRadius = Math.max(8.5, packingDistance * BODY_RADIUS_RATIO);
     const idleSeeds = finalTargets.map(() => Math.random());
-
-    const leafFlags = finalTargets.map((t) => isInLeaf(t.x, t.y));
-    cleanupLeafTester();
 
     physics.setGravity(0, 0);
 
     state = {
-      bounds,
+      bounds: layout.bounds,
       tex: textures.get(app, '🍎', 32),
       leafTex: textures.get(app, '🍏', 32),
-      leafFlags,
+      leafFlags: layout.leafFlags,
       bodies: [],
       finalTargets,
       runtimeTargets,
-      packingDistance,
-      bodyRadius,
+      packingDistance: layout.packingDistance,
+      bodyRadius: layout.bodyRadius,
       physics,
       sceneManager,
       idleSeeds,
@@ -439,6 +493,11 @@ export const appleScene = {
     if (!state) return;
     state.physics.setGravity(0, 0);
     state = null;
+  },
+
+  resize(app) {
+    if (!state) return;
+    applyAppleLayout(app);
   },
 
   onPointerDown(app, physics, x, y) {

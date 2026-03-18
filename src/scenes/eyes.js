@@ -43,7 +43,7 @@ const INNER_SWAY_SPEED = 1.05;
 const MOTION_STRETCH_X = 0.08;
 const MOTION_SQUASH_Y = 0.03;
 const ELLIPSE_PARALLAX_EXTRA = 0.7;
-const ELLIPSE_INFLUENCE_RADIUS = 0.7;
+const ELLIPSE_INFLUENCE_RADIUS = 0.6;
 const ELLIPSE_FILL_RADIUS = 2.0;
 const ELLIPSE_FILL_STRENGTH = 0.35;
 
@@ -108,6 +108,8 @@ function getEyeLayout(app) {
 
 function getLayoutCacheKey(bounds) {
   return [
+    Math.round(bounds.x),
+    Math.round(bounds.y),
     Math.round(bounds.width),
     Math.round(bounds.height),
     PARTICLE_COUNT,
@@ -141,6 +143,67 @@ function resolveEyesCache(bounds) {
   }
 
   return cached;
+}
+
+function applyEyesLayout(app) {
+  const layout = getEyeLayout(app);
+  const cached = resolveEyesCache(layout.eye);
+
+  state.eyeBounds = layout.eye;
+  state.maxOffset = layout.maxOffset;
+  state.packingDistance = cached.packingDistance;
+  state.bodyRadius = cached.bodyRadius;
+  state.totalCount = cached.finalTargets.length;
+
+  for (let i = 0; i < cached.finalTargets.length; i++) {
+    const next = cached.finalTargets[i];
+    const normX = (next.baseX - layout.eye.x) / layout.eye.width;
+    const normY = (next.baseY - layout.eye.y) / layout.eye.height;
+
+    if (state.finalTargets[i]) {
+      state.finalTargets[i].baseX = next.baseX;
+      state.finalTargets[i].baseY = next.baseY;
+      state.finalTargets[i].x = next.baseX;
+      state.finalTargets[i].y = next.baseY;
+      state.finalTargets[i].eyeIndex = next.eyeIndex;
+    } else {
+      state.finalTargets.push({
+        baseX: next.baseX,
+        baseY: next.baseY,
+        x: next.baseX,
+        y: next.baseY,
+        eyeIndex: next.eyeIndex,
+      });
+    }
+
+    if (state.runtimeTargets[i]) {
+      state.runtimeTargets[i].x = next.baseX;
+      state.runtimeTargets[i].y = next.baseY;
+      state.runtimeTargets[i].eyeIndex = next.eyeIndex;
+      state.runtimeTargets[i].ellipseInfluence = ellipseInfluence(normX, normY);
+      state.runtimeTargets[i].fillFactor = ellipseFillFactor(normX, normY);
+    } else {
+      state.runtimeTargets.push({
+        x: next.baseX,
+        y: next.baseY,
+        eyeIndex: next.eyeIndex,
+        ellipseInfluence: ellipseInfluence(normX, normY),
+        fillFactor: ellipseFillFactor(normX, normY),
+      });
+    }
+  }
+
+  state.finalTargets.length = cached.finalTargets.length;
+  state.runtimeTargets.length = cached.finalTargets.length;
+  state.eyeCenters = computeEyeCenters(state.finalTargets);
+
+  if (state.phase === 'idle') {
+    syncIdleTargets();
+  }
+
+  for (let i = 0; i < state.bodies.length; i++) {
+    state.bodies[i].targetPosition = state.runtimeTargets[i];
+  }
 }
 
 function selectEvenSubset(points, count) {
@@ -583,6 +646,11 @@ export const eyesScene = {
     if (!state) return;
     state.physics.setGravity(0, 0);
     state = null;
+  },
+
+  resize(app) {
+    if (!state) return;
+    applyEyesLayout(app);
   },
 
   onPointerDown(app, physics, x, y) {

@@ -88,6 +88,8 @@ function getLaptopBounds(app) {
 
 function getLayoutCacheKey(bounds) {
   return [
+    Math.round(bounds.x),
+    Math.round(bounds.y),
     Math.round(bounds.width),
     Math.round(bounds.height),
     PARTICLE_COUNT,
@@ -154,6 +156,63 @@ function resolveLaptopCache(bounds) {
   }
 
   return cached;
+}
+
+function applyLaptopLayout(app) {
+  const bounds = getLaptopBounds(app);
+  const cached = resolveLaptopCache(bounds);
+  let interruptedRouting = false;
+
+  state.packingDistance = cached.packingDistance;
+  state.bodyRadius = cached.bodyRadius;
+  state.loaderCenter = getLoaderCenter(bounds);
+
+  for (let i = 0; i < cached.finalTargets.length; i++) {
+    const next = cached.finalTargets[i];
+
+    if (state.finalTargets[i]) {
+      state.finalTargets[i].x = next.x;
+      state.finalTargets[i].y = next.y;
+      state.finalTargets[i].isLoader = next.isLoader;
+      state.finalTargets[i].loaderAngle = next.loaderAngle;
+      state.finalTargets[i].loaderRadius = next.loaderRadius;
+    } else {
+      state.finalTargets.push({ ...next });
+    }
+
+    if (state.runtimeTargets[i]) {
+      state.runtimeTargets[i].x = next.x;
+      state.runtimeTargets[i].y = next.y;
+    } else {
+      state.runtimeTargets.push({
+        x: next.x,
+        y: next.y,
+      });
+    }
+
+    if (state.motions[i] && state.motions[i].mode === 'path') {
+      state.motions[i].mode = 'spring';
+      interruptedRouting = true;
+    }
+
+    if (state.bodies[i]) {
+      state.bodies[i].targetPosition = state.runtimeTargets[i];
+      state.bodies[i].collisionFilter.group = 0;
+      state.bodies[i].collisionFilter.mask = -1;
+    }
+  }
+
+  state.finalTargets.length = cached.finalTargets.length;
+  state.runtimeTargets.length = cached.finalTargets.length;
+
+  if (state.phase === 'routing' || interruptedRouting) {
+    state.phase = 'recover';
+    state.recoverElapsed = 0;
+  }
+
+  if (state.phase !== 'routing') {
+    syncLoaderTargets(0);
+  }
 }
 
 function getLoaderCenter(bounds) {
@@ -668,6 +727,11 @@ export const laptopScene = {
     if (!state) return;
     state.physics.setGravity(0, 0);
     state = null;
+  },
+
+  resize(app) {
+    if (!state) return;
+    applyLaptopLayout(app);
   },
 
   onPointerDown(app, physics, x, y) {

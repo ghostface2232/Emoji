@@ -71,6 +71,8 @@ function getHeartBounds(app) {
 
 function getLayoutCacheKey(bounds) {
   return [
+    Math.round(bounds.x),
+    Math.round(bounds.y),
     Math.round(bounds.width),
     Math.round(bounds.height),
     PARTICLE_COUNT,
@@ -245,6 +247,49 @@ function resolveHeartCache(bounds) {
   }
 
   return cached;
+}
+
+function applyHeartLayout(app) {
+  const bounds = getHeartBounds(app);
+  const cached = resolveHeartCache(bounds);
+
+  state.bounds = bounds;
+  state.center = cached.center;
+  state.packingDistance = cached.packingDistance;
+  state.bodyRadius = cached.bodyRadius;
+
+  for (let i = 0; i < cached.finalTargets.length; i++) {
+    const next = cached.finalTargets[i];
+
+    if (state.finalTargets[i]) {
+      state.finalTargets[i].baseX = next.baseX;
+      state.finalTargets[i].baseY = next.baseY;
+      state.finalTargets[i].dirX = next.dirX;
+      state.finalTargets[i].dirY = next.dirY;
+      state.finalTargets[i].distNorm = next.distNorm;
+      state.finalTargets[i].pulseOffset = next.pulseOffset;
+      state.finalTargets[i].pulseScale = next.pulseScale;
+    } else {
+      state.finalTargets.push({ ...next });
+    }
+
+    if (state.runtimeTargets[i]) {
+      state.runtimeTargets[i].x = next.baseX;
+      state.runtimeTargets[i].y = next.baseY;
+    } else {
+      state.runtimeTargets.push({
+        x: next.baseX,
+        y: next.baseY,
+      });
+    }
+  }
+
+  state.finalTargets.length = cached.finalTargets.length;
+  state.runtimeTargets.length = cached.finalTargets.length;
+
+  if (state.phase !== 'forming') {
+    syncPulseTargets();
+  }
 }
 
 function getSpringProfile() {
@@ -434,6 +479,11 @@ export const heartScene = {
       entry.wall.friction = entry.friction;
     }
     state = null;
+  },
+
+  resize(app) {
+    if (!state) return;
+    applyHeartLayout(app);
   },
 
   onPointerDown(app, physics, x, y) {

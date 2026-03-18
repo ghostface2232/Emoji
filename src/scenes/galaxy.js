@@ -114,6 +114,8 @@ function getGalaxyBounds(app) {
 
 function getLayoutCacheKey(bounds) {
   return [
+    Math.round(bounds.x),
+    Math.round(bounds.y),
     Math.round(bounds.width),
     Math.round(bounds.height),
     PARTICLE_COUNT,
@@ -175,6 +177,49 @@ function resolveGalaxyCache(bounds) {
   }
 
   return cached;
+}
+
+function applyGalaxyLayout(app) {
+  const bounds = getGalaxyBounds(app);
+  const cached = resolveGalaxyCache(bounds);
+
+  state.bounds = bounds;
+  state.center = cached.center;
+  state.maxRadius = cached.maxRadius;
+  state.packingDistance = cached.packingDistance;
+  state.bodyRadius = cached.bodyRadius;
+
+  for (let i = 0; i < cached.finalTargets.length; i++) {
+    const next = cached.finalTargets[i];
+
+    if (state.finalTargets[i]) {
+      state.finalTargets[i].baseX = next.baseX;
+      state.finalTargets[i].baseY = next.baseY;
+      state.finalTargets[i].distFromCenter = next.distFromCenter;
+      state.finalTargets[i].dirX = next.dirX;
+      state.finalTargets[i].dirY = next.dirY;
+      state.finalTargets[i].distNorm = next.distNorm;
+    } else {
+      state.finalTargets.push({ ...next });
+    }
+
+    if (state.runtimeTargets[i]) {
+      state.runtimeTargets[i].x = next.baseX;
+      state.runtimeTargets[i].y = next.baseY;
+    } else {
+      state.runtimeTargets.push({
+        x: next.baseX,
+        y: next.baseY,
+      });
+    }
+  }
+
+  state.finalTargets.length = cached.finalTargets.length;
+  state.runtimeTargets.length = cached.finalTargets.length;
+
+  if (state.phase === 'rotating') {
+    syncRotationTargets();
+  }
 }
 
 function createBackgroundStars(app, renderer, textures) {
@@ -579,6 +624,11 @@ export const galaxyScene = {
       entry.wall.friction = entry.friction;
     }
     state = null;
+  },
+
+  resize(app) {
+    if (!state) return;
+    applyGalaxyLayout(app);
   },
 
   onPointerDown(app, physics, x, y) {

@@ -36,6 +36,17 @@ async function boot() {
   initInteractions(app, physics, sceneManager);
 
   // 7. 메인 루프
+  let resizeFrame = 0;
+  window.addEventListener('resize', () => {
+    if (resizeFrame) {
+      cancelAnimationFrame(resizeFrame);
+    }
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = 0;
+      sceneManager.onResize();
+    });
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
     sceneManager.update(dt);
