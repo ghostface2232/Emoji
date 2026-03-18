@@ -1,17 +1,11 @@
-import { appleScene } from './apple.js';
-import { eyesScene } from './eyes.js';
-import { heartScene } from './heart.js';
-import { laptopScene } from './laptop.js';
-import { galaxyScene } from './galaxy.js';
-
 /** @typedef {{ setup: Function, update: Function, teardown: Function, onPointerDown: Function }} Scene */
 
-const SCENE_MAP = {
-  apple: appleScene,
-  eyes: eyesScene,
-  heart: heartScene,
-  laptop: laptopScene,
-  galaxy: galaxyScene,
+const SCENE_LOADERS = {
+  apple: () => import('./apple.js').then((module) => module.appleScene),
+  eyes: () => import('./eyes.js').then((module) => module.eyesScene),
+  heart: () => import('./heart.js').then((module) => module.heartScene),
+  laptop: () => import('./laptop.js').then((module) => module.laptopScene),
+  galaxy: () => import('./galaxy.js').then((module) => module.galaxyScene),
 };
 
 export class SceneManager {
@@ -35,6 +29,35 @@ export class SceneManager {
     this.switchToken = 0;
     this.loadingEl = this.createLoadingOverlay();
     this.prewarmPromises = new Map();
+    this.scenePromises = new Map();
+    this.sceneCache = new Map();
+  }
+
+  loadScene(sceneId) {
+    if (this.sceneCache.has(sceneId)) {
+      return Promise.resolve(this.sceneCache.get(sceneId));
+    }
+
+    if (this.scenePromises.has(sceneId)) {
+      return this.scenePromises.get(sceneId);
+    }
+
+    const loader = SCENE_LOADERS[sceneId];
+    if (!loader) {
+      return Promise.resolve(null);
+    }
+
+    const promise = loader().then((scene) => {
+      this.sceneCache.set(sceneId, scene);
+      this.scenePromises.delete(sceneId);
+      return scene;
+    }).catch((error) => {
+      this.scenePromises.delete(sceneId);
+      throw error;
+    });
+
+    this.scenePromises.set(sceneId, promise);
+    return promise;
   }
 
   createLoadingOverlay() {
@@ -72,15 +95,14 @@ export class SceneManager {
   }
 
   prewarm(sceneId) {
-    const scene = SCENE_MAP[sceneId];
-    if (!scene || !scene.prewarm) return Promise.resolve();
     if (this.prewarmPromises.has(sceneId)) {
       return this.prewarmPromises.get(sceneId);
     }
 
-    const promise = Promise.resolve(
-      scene.prewarm(this.app, this.physics, this.renderer, this.textures, this)
-    ).finally(() => {
+    const promise = this.loadScene(sceneId).then((scene) => {
+      if (!scene || !scene.prewarm) return;
+      return scene.prewarm(this.app, this.physics, this.renderer, this.textures, this);
+    }).finally(() => {
       this.prewarmPromises.delete(sceneId);
     });
 
@@ -152,7 +174,7 @@ export class SceneManager {
     this.clearSprites();
     this.physics.clearParticles();
 
-    const scene = SCENE_MAP[sceneId];
+    const scene = await this.loadScene(sceneId);
     if (!scene) {
       console.warn(`Unknown scene: ${sceneId}`);
       return;
@@ -182,9 +204,9 @@ export class SceneManager {
    * c. Body→Sprite 위치/회전 동기화
    * @param {number} dt
    */
-  onResize() {
+  onResize(mode = 'final') {
     if (this.current && this.current.resize) {
-      this.current.resize(this.app, this.physics, this.renderer, this.textures, this);
+      this.current.resize(this.app, this.physics, this.renderer, this.textures, this, { mode });
     }
   }
 

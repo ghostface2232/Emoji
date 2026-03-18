@@ -163,6 +163,7 @@ function applyLaptopLayout(app) {
   const cached = resolveLaptopCache(bounds);
   let interruptedRouting = false;
 
+  state.bounds = bounds;
   state.packingDistance = cached.packingDistance;
   state.bodyRadius = cached.bodyRadius;
   state.loaderCenter = getLoaderCenter(bounds);
@@ -213,6 +214,56 @@ function applyLaptopLayout(app) {
   if (state.phase !== 'routing') {
     syncLoaderTargets(0);
   }
+}
+
+function remapPoint(point, fromBounds, toBounds) {
+  point.x = toBounds.x + ((point.x - fromBounds.x) / Math.max(fromBounds.width, 1)) * toBounds.width;
+  point.y = toBounds.y + ((point.y - fromBounds.y) / Math.max(fromBounds.height, 1)) * toBounds.height;
+}
+
+function previewLaptopLayout(app) {
+  const previousBounds = state.bounds;
+  const bounds = getLaptopBounds(app);
+  const scaleX = bounds.width / Math.max(previousBounds.width, 1);
+  let interruptedRouting = false;
+
+  for (let i = 0; i < state.finalTargets.length; i++) {
+    const target = state.finalTargets[i];
+    remapPoint(target, previousBounds, bounds);
+    if (target.isLoader) {
+      target.loaderRadius *= scaleX;
+    }
+
+    state.runtimeTargets[i].x = target.x;
+    state.runtimeTargets[i].y = target.y;
+
+    if (state.motions[i] && state.motions[i].mode === 'path') {
+      state.motions[i].mode = 'spring';
+      interruptedRouting = true;
+    }
+
+    if (state.bodies[i]) {
+      const mapped = { x: state.bodies[i].position.x, y: state.bodies[i].position.y };
+      remapPoint(mapped, previousBounds, bounds);
+      Matter.Body.setPosition(state.bodies[i], mapped);
+      Matter.Body.setVelocity(state.bodies[i], { x: 0, y: 0 });
+      state.bodies[i].targetPosition = state.runtimeTargets[i];
+      state.bodies[i].collisionFilter.group = 0;
+      state.bodies[i].collisionFilter.mask = -1;
+    }
+  }
+
+  state.bounds = bounds;
+  state.loaderCenter = getLoaderCenter(bounds);
+  state.packingDistance *= scaleX;
+  state.bodyRadius *= scaleX;
+
+  if (state.phase === 'routing' || interruptedRouting) {
+    state.phase = 'recover';
+    state.recoverElapsed = 0;
+  }
+
+  syncLoaderTargets(0);
 }
 
 function getLoaderCenter(bounds) {
@@ -661,6 +712,7 @@ export const laptopScene = {
     state = {
       physics,
       sceneManager,
+      bounds,
       finalTargets: assignedTargets,
       runtimeTargets,
       motions,
@@ -729,8 +781,12 @@ export const laptopScene = {
     state = null;
   },
 
-  resize(app) {
+  resize(app, physics, renderer, textures, sceneManager, options = {}) {
     if (!state) return;
+    if (options.mode === 'preview') {
+      previewLaptopLayout(app);
+      return;
+    }
     applyLaptopLayout(app);
   },
 

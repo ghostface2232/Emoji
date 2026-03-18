@@ -206,6 +206,45 @@ function applyEyesLayout(app) {
   }
 }
 
+function remapPoint(point, fromBounds, toBounds) {
+  point.x = toBounds.x + ((point.x - fromBounds.x) / Math.max(fromBounds.width, 1)) * toBounds.width;
+  point.y = toBounds.y + ((point.y - fromBounds.y) / Math.max(fromBounds.height, 1)) * toBounds.height;
+}
+
+function previewEyesLayout(app) {
+  const previousBounds = state.eyeBounds;
+  const layout = getEyeLayout(app);
+  const scaleX = layout.eye.width / Math.max(previousBounds.width, 1);
+
+  for (const target of state.finalTargets) {
+    remapPoint(target, previousBounds, layout.eye);
+    target.baseX = target.x;
+    target.baseY = target.y;
+  }
+
+  for (const target of state.runtimeTargets) {
+    remapPoint(target, previousBounds, layout.eye);
+  }
+
+  for (const center of state.eyeCenters) {
+    remapPoint(center, previousBounds, layout.eye);
+  }
+
+  for (const body of state.bodies) {
+    const mapped = { x: body.position.x, y: body.position.y };
+    remapPoint(mapped, previousBounds, layout.eye);
+    Matter.Body.setPosition(body, mapped);
+    Matter.Body.setVelocity(body, { x: 0, y: 0 });
+  }
+
+  state.eyeBounds = layout.eye;
+  state.maxOffset *= scaleX;
+  state.glanceOffset *= scaleX;
+  state.lastLookOffset *= scaleX;
+  state.packingDistance *= scaleX;
+  state.bodyRadius *= scaleX;
+}
+
 function selectEvenSubset(points, count) {
   if (points.length <= count) return points.slice();
 
@@ -648,8 +687,12 @@ export const eyesScene = {
     state = null;
   },
 
-  resize(app) {
+  resize(app, physics, renderer, textures, sceneManager, options = {}) {
     if (!state) return;
+    if (options.mode === 'preview') {
+      previewEyesLayout(app);
+      return;
+    }
     applyEyesLayout(app);
   },
 

@@ -306,6 +306,42 @@ function applyAppleLayout(app) {
   }
 }
 
+function remapPoint(point, fromBounds, toBounds) {
+  point.x = toBounds.x + ((point.x - fromBounds.x) / Math.max(fromBounds.width, 1)) * toBounds.width;
+  point.y = toBounds.y + ((point.y - fromBounds.y) / Math.max(fromBounds.height, 1)) * toBounds.height;
+}
+
+function previewAppleLayout(app) {
+  const previousBounds = state.bounds;
+  const bounds = getShapeBounds(app);
+  const scaleX = bounds.width / Math.max(previousBounds.width, 1);
+
+  for (const target of state.finalTargets) {
+    remapPoint(target, previousBounds, bounds);
+  }
+
+  for (const target of state.runtimeTargets) {
+    remapPoint(target, previousBounds, bounds);
+  }
+
+  for (let i = 0; i < state.bodies.length; i++) {
+    const body = state.bodies[i];
+    const mapped = { x: body.position.x, y: body.position.y };
+    remapPoint(mapped, previousBounds, bounds);
+    Matter.Body.setPosition(body, mapped);
+    Matter.Body.setVelocity(body, { x: 0, y: 0 });
+    body.targetPosition = state.runtimeTargets[i];
+  }
+
+  state.bounds = bounds;
+  state.packingDistance *= scaleX;
+  state.bodyRadius *= scaleX;
+
+  if (state.phase === 'idle') {
+    syncIdleTargets();
+  }
+}
+
 function getSpringProfile() {
   if (state.phase === 'spawning') {
     const progress = Math.min(state.elapsed / SPAWN_DURATION, 1);
@@ -495,8 +531,12 @@ export const appleScene = {
     state = null;
   },
 
-  resize(app) {
+  resize(app, physics, renderer, textures, sceneManager, options = {}) {
     if (!state) return;
+    if (options.mode === 'preview') {
+      previewAppleLayout(app);
+      return;
+    }
     applyAppleLayout(app);
   },
 

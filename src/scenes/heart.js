@@ -292,6 +292,47 @@ function applyHeartLayout(app) {
   }
 }
 
+function remapPoint(point, fromBounds, toBounds) {
+  point.x = toBounds.x + ((point.x - fromBounds.x) / Math.max(fromBounds.width, 1)) * toBounds.width;
+  point.y = toBounds.y + ((point.y - fromBounds.y) / Math.max(fromBounds.height, 1)) * toBounds.height;
+}
+
+function previewHeartLayout(app) {
+  const previousBounds = state.bounds;
+  const bounds = getHeartBounds(app);
+  const scaleX = bounds.width / Math.max(previousBounds.width, 1);
+
+  for (const target of state.finalTargets) {
+    const mapped = { x: target.baseX, y: target.baseY };
+    remapPoint(mapped, previousBounds, bounds);
+    target.baseX = mapped.x;
+    target.baseY = mapped.y;
+  }
+
+  for (const target of state.runtimeTargets) {
+    remapPoint(target, previousBounds, bounds);
+  }
+
+  const center = { x: state.center.x, y: state.center.y };
+  remapPoint(center, previousBounds, bounds);
+  state.center = center;
+
+  for (const body of state.bodies) {
+    const mapped = { x: body.position.x, y: body.position.y };
+    remapPoint(mapped, previousBounds, bounds);
+    Matter.Body.setPosition(body, mapped);
+    Matter.Body.setVelocity(body, { x: 0, y: 0 });
+  }
+
+  state.bounds = bounds;
+  state.packingDistance *= scaleX;
+  state.bodyRadius *= scaleX;
+
+  if (state.phase !== 'forming') {
+    syncPulseTargets();
+  }
+}
+
 function getSpringProfile() {
   if (state.phase === 'forming') {
     const progress = Math.min(state.elapsed / SPRING_RAMP_DURATION, 1);
@@ -481,8 +522,12 @@ export const heartScene = {
     state = null;
   },
 
-  resize(app) {
+  resize(app, physics, renderer, textures, sceneManager, options = {}) {
     if (!state) return;
+    if (options.mode === 'preview') {
+      previewHeartLayout(app);
+      return;
+    }
     applyHeartLayout(app);
   },
 

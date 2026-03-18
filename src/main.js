@@ -14,6 +14,44 @@ function scheduleIdle(task) {
   window.setTimeout(task, 300);
 }
 
+function scheduleIdleAfterInactivity(task, delay = 4000) {
+  let timerId = 0;
+  let completed = false;
+
+  const eventNames = ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel'];
+
+  function cleanup() {
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = 0;
+    }
+    for (const eventName of eventNames) {
+      window.removeEventListener(eventName, bumpSchedule, true);
+    }
+  }
+
+  function runTask() {
+    if (completed) return;
+    completed = true;
+    cleanup();
+    scheduleIdle(task);
+  }
+
+  function bumpSchedule() {
+    if (completed) return;
+    if (timerId) {
+      clearTimeout(timerId);
+    }
+    timerId = window.setTimeout(runTask, delay);
+  }
+
+  for (const eventName of eventNames) {
+    window.addEventListener(eventName, bumpSchedule, true);
+  }
+
+  bumpSchedule();
+}
+
 async function boot() {
   // 1. PixiJS 초기화
   const renderer = new Renderer();
@@ -37,14 +75,23 @@ async function boot() {
 
   // 7. 메인 루프
   let resizeFrame = 0;
+  let resizeFinalizeTimer = 0;
   window.addEventListener('resize', () => {
     if (resizeFrame) {
       cancelAnimationFrame(resizeFrame);
     }
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = 0;
-      sceneManager.onResize();
+      sceneManager.onResize('preview');
     });
+
+    if (resizeFinalizeTimer) {
+      clearTimeout(resizeFinalizeTimer);
+    }
+    resizeFinalizeTimer = window.setTimeout(() => {
+      resizeFinalizeTimer = 0;
+      sceneManager.onResize('final');
+    }, 140);
   });
 
   app.ticker.add((ticker) => {
@@ -54,7 +101,7 @@ async function boot() {
 
   // 초기에는 아무 장면도 선택하지 않은 idle 상태로 시작한다.
   // 눈 장면 캐시는 백그라운드 idle 시간에 미리 준비한다.
-  scheduleIdle(() => {
+  scheduleIdleAfterInactivity(() => {
     sceneManager.prewarm('eyes');
   });
 }
